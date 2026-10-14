@@ -410,7 +410,9 @@ function Timeline:render()
 			and thumbnail.width ~= 0
 			and thumbnail.height ~= 0
 		then
-			local border = math.ceil(math.max(2, state.radius / 2) * state.scale)
+			-- 2026-10-15 patch: 缩略图 bg 边框硬收敛——原公式 ceil(max(2, radius/2)*scale) 在 hidpi=2 屏上有 4 OSD px(8物理px)厚边,
+			-- 固定为 1 OSD px(2物理px) 的极细边框,视觉接近无边
+			local border = 1
 			local thumb_x_margin, thumb_y_margin = border + tooltip_gap + bax, border + tooltip_gap
 			local thumb_width, thumb_height = thumbnail.width, thumbnail.height
 			local thumb_x = round(clamp(
