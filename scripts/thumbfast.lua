@@ -348,10 +348,14 @@ local function vf_string(filters, full)
                 end
             end
             if not tone_mappings[tone_mapping] then
-                tone_mapping = "hable"
+                tone_mapping = "clip"
             end
             last_tone_mapping = tone_mapping
-            vf = vf .. "zscale=transfer=linear,format=gbrpf32le,tonemap="..tone_mapping..",zscale=transfer=bt709,"
+            -- 2026-10-15 修复v2：brew ffmpeg 9.0.2 未编译 libzimg，ffmpeg 侧（含 lavfi bridge）完全没有 zscale 滤镜；
+            -- 改用 mpv 自带的 tonemap 滤镜（纯 mpv 管线，不依赖 libzimg）
+            -- 2026-10-15 调整v3：rgba64 从缩放前去掉——vf 顺序改为 tonemap 后直接 8bit 转换，
+            -- scale/swscale 在 10bit YUV 域完成（与原 fallback 链一致），消除 64bit 中转带来的异常黑边
+            vf = vf .. "tonemap="..tone_mapping..","
         end
     end
 
