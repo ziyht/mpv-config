@@ -12,7 +12,7 @@
 local settings = { enabled = true, peak = 1600 }   -- 文件不存在时的兜底默认
 local opts = require 'mp.options'
 opts.read_options(settings, 'sdrboost')
-settings.peak = math.max(400, math.min(4000, tonumber(settings.peak) or 1600))
+settings.peak = math.max(100, math.min(2000, tonumber(settings.peak) or 1600))
 
 local boosting = false          -- 当前是否实际占用着 target-* 属性
 local last_message = nil        -- 防止 OSD 抖动的简单去重
@@ -77,29 +77,29 @@ local function refresh()
 end
 
 ---------------- 对外命令 ----------------
-
+-- 2026-10-16 v2: 全部静默（用户不需要 OSD 提示），UI 状态由 FHDR 按钮颜色自表达
 mp.register_script_message('sdrboost-toggle', function()
     settings.enabled = not settings.enabled
     save_state()
     refresh()
-    local g = mp.get_property('video-params/gamma')
-    if settings.enabled then
-        if g and gamma_is_hdr(g) then
-            osd('HDR 源，SDR 增强不适用', true)
-        else
-            osd(string.format('SDR 亮度增强 开（上限 %d nit）', settings.peak), true)
-        end
-    else
-        osd('SDR 亮度增强 关', true)
-    end
 end)
 
 mp.register_script_message('sdrboost-peak', function(arg)
     local d = tonumber(arg) or 0
-    settings.peak = math.max(800, math.min(2100, settings.peak + d))
+    settings.peak = math.max(100, math.min(2000, settings.peak + d))
     save_state()
     refresh()
-    osd(string.format('SDR 增强峰值上限：%d nit', settings.peak), true)
+end)
+
+-- FHDR 滑块（uosc elements/Fhdr.lua）直接改 user-data/sdrboost/peak → 同步应用
+mp.observe_property('user-data/sdrboost/peak', 'native', function(_, v)
+    if v == nil then return end
+    local planned = math.max(100, math.min(2000, math.floor(tonumber(v) or settings.peak)))
+    if planned ~= settings.peak then
+        settings.peak = planned
+        save_state()
+        refresh()
+    end
 end)
 
 ---------------- 属性监听 ----------------
@@ -110,14 +110,6 @@ mp.observe_property('user-data/sdrboost/enabled', 'bool', function(_, v)
     settings.enabled = v
     save_state()
     refresh()
-    local g = mp.get_property('video-params/gamma')
-    if settings.enabled and g and gamma_is_hdr(g) then
-        osd('HDR 源，SDR 增强不适用', true)
-    elseif settings.enabled then
-        osd(string.format('SDR 亮度增强 开（上限 %d nit）', settings.peak), true)
-    else
-        osd('SDR 亮度增强 关', true)
-    end
 end)
 
 -- 换片/滤镜装卸时重算

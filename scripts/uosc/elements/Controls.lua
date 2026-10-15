@@ -189,6 +189,19 @@ function Controls:init_options()
 			else
 				msg.error('there can only be 1 speed slider')
 			end
+		elseif kind == 'fhdr' then
+			-- 2026-10-16 patch: FHDR 文字按钮 + 悬停滑块（SDR 亮度增强控制）
+			local Fhdr = require('elements/Fhdr')
+			if not self.fhdr_slider then
+				self.fhdr_slider = Fhdr.Slider:new('fhdr_slider', {})
+			end
+			local element = Fhdr.Button:new('control_fhdr_' .. i, {
+				render_order = self.render_order,
+				anchor_id = 'controls',
+				slider = self.fhdr_slider,
+				on_click = function() mp.command('script-message sdrboost-toggle') end,
+			})
+			table_assign(control, {element = element, sizing = 'static', scale = 1, ratio = 2.2})
 		else
 			msg.error('unknown element kind "' .. kind .. '"')
 			break
