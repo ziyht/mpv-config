@@ -8,7 +8,28 @@ local Element = require('elements/Element')
 
 local COLOR_ON  = 'ffb13f' -- 橙(开启)
 local COLOR_OFF = '8a8a8a' -- 灰(关闭)
+local COLOR_HDR = '7fe3ff' -- 青(HDR源发光)
 local PEAK_MIN, PEAK_MAX = 100, 2000
+
+-- RGB(如'ffb13f') → ASS 的 BGR('3fb1ff')
+local function rgb_to_bgr(rgb)
+	return rgb:sub(5, 6) .. rgb:sub(3, 4) .. rgb:sub(1, 2)
+end
+
+-- 发光文字：外层 \blur6 同色光晕 + 内层实体字
+local function glow_txt(ass, x, y, size, text, color, border_color)
+	local bgr = rgb_to_bgr(color)
+	-- 光晕层：字本体透明，只留 blurred 色边
+	ass:new_event()
+	ass.text = ass.text .. string.format(
+		'{\\pos(%d,%d)\\an5\\blur7\\bord4\\fs%d\\b1\\fn%s\\1c&H000000&\\3c&H%s&\\1a&HFF&\\3a&H99&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, text)
+	-- 实体字层
+	ass:new_event()
+	ass.text = ass.text .. string.format(
+		'{\\pos(%d,%d)\\an5\\blur0\\bord1.5\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, rgb_to_bgr(border_color or '000000'), text)
+end
 
 -- ==================== 浮层滑块 ====================
 
@@ -60,17 +81,18 @@ function FhdrSlider:render()
 	local ass = assdraw.ass_new()
 	local height = self.height
 
-	-- 关闭态（hover 按钮但 SDR 增强未开）：灰调提示，不响应任何输入
+	-- 关闭态（hover 按钮但未开/或 HDR 源）：灰调提示，不响应任何输入
 	if self.disabled_mode then
+		local is_hdr_mode = self.disabled_mode == 'hdr'
 		ass:rect(self.ax, self.ay, self.bx, self.by, {
 			color = '000000', radius = 6, opacity = 0.95,
-			border = 1.5, border_color = '888888',
+			border = 1.5, border_color = is_hdr_mode and COLOR_HDR or '888888',
 		})
 		ass:txt(self.ax + self.width / 2, self.ay + height / 2, 5,
-			'已关闭 · 点击 FHDR 开启后再调节',
+			is_hdr_mode and 'HDR 源 · 直通输出，FHDR 不适用' or '已关闭 · 点击 FHDR 开启后再调节',
 			{
 				size = round(height * 0.5),
-				color = 'aaaaaa', bold = true,
+				color = is_hdr_mode and COLOR_HDR or 'aaaaaa', bold = true,
 				border = 2, border_color = '000000',
 			})
 		return ass
@@ -141,8 +163,9 @@ function FhdrButton:init(id, props)
 	local on_click = props.on_click
 	self._click = function() mp.add_timeout(0.01, on_click) end
 	Element.init(self, id, {anchor_id = props.anchor_id, render_order = props.render_order})
-	-- 状态变化时驱动重绘
+	-- 状态变化时驱动重绘（开关 + 片源 SDR/HDR 切换都要刷新外观）
 	mp.observe_property('user-data/sdrboost/enabled', 'bool', function() request_render() end)
+	mp.observe_property('video-params/gamma', 'string', function() request_render() end)
 	-- DEBUG/维护通道：强制弹滑块 4 秒（排查 hover 链用）
 	mp.register_script_message('fhdr-force-show', function()
 		self.force_show_until = mp.get_time() + 4
@@ -163,32 +186,26 @@ function FhdrButton:render()
 
 	local is_enabled = mp.get_property_bool('user-data/sdrboost/enabled')
 	local is_hover = self.proximity_raw == 0
+	-- HDR 源检测：按钮变彩色 'HDR' + 发光，忽略 sdrboost 开关（升压对 HDR 无意义）
+	local src_gamma = mp.get_property('video-params/gamma')
+	local is_hdr_src = src_gamma == 'pq' or src_gamma == 'arib-std-b67'
 
 	cursor:zone('primary_down', self, function() self._click() end)
 
 	-- 悬停 → 滑块贴按钮上方（或 force-show 调试窗口期内强制显示）
-	-- 开启态显示可调滑块；关闭态显示灰调提示条（始终给 hover 反馈）
 	-- 保持条件：按钮 hover、滑块自身 hover、拖动中三者任一成立（鼠标从按钮移到滑块全程无缝）
 	local force_show = self.force_show_until and mp.get_time() < self.force_show_until
 	local slider_hover = self.slider.proximity_raw == 0
 	local slider_keep = self.slider.enabled_flag and (slider_hover or self.slider.dragging)
 	if is_hover or force_show or slider_keep then
-		if not self.slider.enabled_flag then
-			-- DEBUG WILL REMOVE
-			mp.msg.warn(string.format('FHDR_SLIDER_SHOW hover=%s force=%s keep=%s', tostring(is_hover), tostring(force_show), tostring(slider_keep)))
-		end
 		local slider_w = math.max(200, round((self.bx - self.ax) * 3))
 		local ax = round(self.bx - slider_w)
 		-- 底边与按钮顶边重叠 3px：鼠标垂直移动路径无 hover 断点
 		local by = self.ay + 3
 		self.slider:place(ax, by - 45, ax + slider_w, by)
 		self.slider.enabled_flag = true
-		self.slider.disabled_mode = not is_enabled
+		self.slider.disabled_mode = is_hdr_src and 'hdr' or (not is_enabled and true or nil)
 	elseif not self.slider.dragging then
-		if self.slider.enabled_flag then
-			-- DEBUG WILL REMOVE
-			mp.msg.warn(string.format('FHDR_SLIDER_HIDE hover=%s slider_hover=%s vis=%s', tostring(is_hover), tostring(slider_hover), tostring(visibility)))
-		end
 		self.slider.enabled_flag = false
 	end
 
@@ -203,24 +220,34 @@ function FhdrButton:render()
 		})
 	end
 
-	-- 字母（开=橙字带橙色描边框；关=灰字无框，状态一眼可辨）
+	-- 字母（HDR源='HDR'彩色发光；SDR源='FHDR' 开=橙 关=灰）
 	local x, y = round(self.ax + (self.bx - self.ax) / 2), round(self.ay + (self.by - self.ay) / 2)
-	if is_enabled then
+	if is_hdr_src then
+		if config.opacity.controls > 0 or is_hover then
+			ass:rect(self.ax + 2, self.ay + 2, self.bx - 2, self.by - 2, {
+				color = '000000', radius = state.radius, opacity = 0,
+				border = 1.5, border_color = COLOR_HDR,
+			})
+		end
+		glow_txt(ass, x, y, self.font_size, 'HDR', COLOR_HDR)
+	elseif is_enabled then
 		-- 橙色描边框包住按钮，开启态醒目
 		ass:rect(self.ax + 2, self.ay + 2, self.bx - 2, self.by - 2, {
 			color = '000000', radius = state.radius,
 			opacity = 0,
 			border = 1.5, border_color = COLOR_ON,
 		})
+		glow_txt(ass, x, y, self.font_size, 'FHDR', COLOR_ON)
+	else
+		ass:txt(x, y, 5, 'FHDR', {
+			size = self.font_size,
+			color = COLOR_OFF,
+			opacity = visibility * 0.8,
+			bold = true,
+			border = 1,
+			border_color = '000000',
+		})
 	end
-	ass:txt(x, y, 5, 'FHDR', {
-		size = self.font_size,
-		color = is_enabled and COLOR_ON or COLOR_OFF,
-		opacity = visibility * (is_enabled and 1 or 0.8),
-		bold = true,
-		border = 1,
-		border_color = '000000',
-	})
 
 	return ass
 end
