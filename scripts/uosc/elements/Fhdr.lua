@@ -32,19 +32,23 @@ local function hue_to_rgb(h)
 	return string.format('%02x%02x%02x', round(r * 255), round(g * 255), round(b * 255))
 end
 
--- 发光文字（三层）：外层大模糊半透明字本体 = 光晕 blob（不依赖 border 渲染行为）
-local function glow_txt(ass, x, y, size, text, color)
+-- 发光文字（三层，intensity 驱动光晕呼吸）：外层大模糊半透明字本体 = 光晕 blob
+local function glow_txt(ass, x, y, size, text, color, intensity)
+	intensity = intensity or 1
 	local bgr = rgb_to_bgr(color)
+	-- 光晕透明度随 intensity 调制（1=最亮 &H20，低=变暗）
+	local outer_a = 0x20 + math.floor((1 - intensity) * 0x80)
+	local mid_a = 0x28 + math.floor((1 - intensity) * 0x50)
 	-- 光晕外层：大范围软光（半透明彩色字整体模糊）
 	ass:new_event()
 	ass.text = ass.text .. string.format(
-		'{\\pos(%d,%d)\\an5\\blur9\\bord0.5\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H66&\\3a&H66&\\4a&HFF&}%s',
-		x, y, size, config.font, bgr, bgr, text)
+		'{\\pos(%d,%d)\\an5\\blur9\\bord0.5\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H%02X&\\3a&H%02X&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, bgr, outer_a, outer_a, text)
 	-- 光晕中层：紧贴实体的加浓
 	ass:new_event()
 	ass.text = ass.text .. string.format(
-		'{\\pos(%d,%d)\\an5\\blur3\\bord1\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H33&\\3a&H40&\\4a&HFF&}%s',
-		x, y, size, config.font, bgr, bgr, text)
+		'{\\pos(%d,%d)\\an5\\blur3\\bord1\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H%02X&\\3a&H%02X&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, bgr, mid_a, mid_a + 0x10, text)
 	-- 实体字层
 	ass:new_event()
 	ass.text = ass.text .. string.format(
@@ -260,15 +264,18 @@ function FhdrButton:render()
 				border = 1.5, border_color = COLOR_HDR,
 			})
 		end
-		-- 三字母同相位统一色彩流动（联动霓虹效果），紧排间距
+		-- 彩虹波浪：邻近色小相位差渐变（不割裂）+ 亮度脉冲波错峰传播（单独变但联动）
 		local t = mp.get_time()
 		local letters = {'H', 'D', 'R'}
 		local spacing = self.font_size * 0.64
 		local x0 = x - spacing  -- 三字母居中: x - sp, x, x + sp
-		local hue = (t * 0.18) % 1
-		local rainbow = hue_to_rgb(hue)
 		for i, letter in ipairs(letters) do
-			glow_txt(ass, x0 + (i - 1) * spacing, y, self.font_size, letter, rainbow)
+			-- 色相：整体缓慢旋转，字母间小偏移(0.11≈40°)形成渐进波浪带
+			local hue = (t * 0.10 - (i - 1) * 0.11) % 1
+			-- 亮度：sin 波沿字母序错峰传播（0.7Hz，相位步进 ~60°）
+			local wave = 0.5 + 0.5 * math.sin(t * math.pi * 2 * 0.7 - (i - 1) * 1.05)
+			local intensity = 0.35 + 0.65 * wave  -- ∈ [0.35, 1]
+			glow_txt(ass, x0 + (i - 1) * spacing, y, self.font_size, letter, hue_to_rgb(hue), intensity)
 		end
 	elseif is_enabled then
 		-- 橙色描边框包住按钮，开启态醒目
