@@ -16,19 +16,40 @@ local function rgb_to_bgr(rgb)
 	return rgb:sub(5, 6) .. rgb:sub(3, 4) .. rgb:sub(1, 2)
 end
 
--- 发光文字：外层 \blur6 同色光晕 + 内层实体字
-local function glow_txt(ass, x, y, size, text, color, border_color)
+-- 色相(0-1) → RGB hex，彩虹用
+local function hue_to_rgb(h)
+	h = h % 1
+	local r, g, b
+	local i = math.floor(h * 6)
+	local f = h * 6 - i
+	local q = 1 - f
+	if i == 0 then r, g, b = 1, f, 0
+	elseif i == 1 then r, g, b = q, 1, 0
+	elseif i == 2 then r, g, b = 0, 1, f
+	elseif i == 3 then r, g, b = 0, q, 1
+	elseif i == 4 then r, g, b = f, 0, 1
+	else r, g, b = 1, 0, q end
+	return string.format('%02x%02x%02x', round(r * 255), round(g * 255), round(b * 255))
+end
+
+-- 发光文字（三层）：外层大模糊半透明字本体 = 光晕 blob（不依赖 border 渲染行为）
+local function glow_txt(ass, x, y, size, text, color)
 	local bgr = rgb_to_bgr(color)
-	-- 光晕层：字本体透明，只留 blurred 色边
+	-- 光晕外层：大范围软光（半透明彩色字整体模糊）
 	ass:new_event()
 	ass.text = ass.text .. string.format(
-		'{\\pos(%d,%d)\\an5\\blur7\\bord4\\fs%d\\b1\\fn%s\\1c&H000000&\\3c&H%s&\\1a&HFF&\\3a&H99&\\4a&HFF&}%s',
-		x, y, size, config.font, bgr, text)
+		'{\\pos(%d,%d)\\an5\\blur9\\bord0.5\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H66&\\3a&H66&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, bgr, text)
+	-- 光晕中层：紧贴实体的加浓
+	ass:new_event()
+	ass.text = ass.text .. string.format(
+		'{\\pos(%d,%d)\\an5\\blur3\\bord1\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\1a&H33&\\3a&H40&\\4a&HFF&}%s',
+		x, y, size, config.font, bgr, bgr, text)
 	-- 实体字层
 	ass:new_event()
 	ass.text = ass.text .. string.format(
 		'{\\pos(%d,%d)\\an5\\blur0\\bord1.5\\fs%d\\b1\\fn%s\\1c&H%s&\\3c&H%s&\\4a&HFF&}%s',
-		x, y, size, config.font, bgr, rgb_to_bgr(border_color or '000000'), text)
+		x, y, size, config.font, bgr, rgb_to_bgr('000000'), text)
 end
 
 -- ==================== 浮层滑块 ====================
@@ -165,7 +186,17 @@ function FhdrButton:init(id, props)
 	Element.init(self, id, {anchor_id = props.anchor_id, render_order = props.render_order})
 	-- 状态变化时驱动重绘（开关 + 片源 SDR/HDR 切换都要刷新外观）
 	mp.observe_property('user-data/sdrboost/enabled', 'bool', function() request_render() end)
-	mp.observe_property('video-params/gamma', 'string', function() request_render() end)
+	mp.observe_property('video-params/gamma', 'string', function(_, g)
+		request_render()
+		-- HDR 态启动彩虹流动定时器（20fps 重绘），离开 HDR 停（不空烧 CPU）
+		local hdr = g == 'pq' or g == 'arib-std-b67'
+		if hdr and not self.rainbow_timer then
+			self.rainbow_timer = mp.add_periodic_timer(0.05, function() request_render() end)
+		elseif not hdr and self.rainbow_timer then
+			self.rainbow_timer:kill()
+			self.rainbow_timer = nil
+		end
+	end)
 	-- DEBUG/维护通道：强制弹滑块 4 秒（排查 hover 链用）
 	mp.register_script_message('fhdr-force-show', function()
 		self.force_show_until = mp.get_time() + 4
@@ -220,7 +251,7 @@ function FhdrButton:render()
 		})
 	end
 
-	-- 字母（HDR源='HDR'彩色发光；SDR源='FHDR' 开=橙 关=灰）
+	-- 字母（HDR源='HDR'彩虹流动发光；SDR源='FHDR' 开=橙 关=灰）
 	local x, y = round(self.ax + (self.bx - self.ax) / 2), round(self.ay + (self.by - self.ay) / 2)
 	if is_hdr_src then
 		if config.opacity.controls > 0 or is_hover then
@@ -229,7 +260,16 @@ function FhdrButton:render()
 				border = 1.5, border_color = COLOR_HDR,
 			})
 		end
-		glow_txt(ass, x, y, self.font_size, 'HDR', COLOR_HDR)
+		-- 三字母同相位统一色彩流动（联动霓虹效果），紧排间距
+		local t = mp.get_time()
+		local letters = {'H', 'D', 'R'}
+		local spacing = self.font_size * 0.64
+		local x0 = x - spacing  -- 三字母居中: x - sp, x, x + sp
+		local hue = (t * 0.18) % 1
+		local rainbow = hue_to_rgb(hue)
+		for i, letter in ipairs(letters) do
+			glow_txt(ass, x0 + (i - 1) * spacing, y, self.font_size, letter, rainbow)
+		end
 	elseif is_enabled then
 		-- 橙色描边框包住按钮，开启态醒目
 		ass:rect(self.ax + 2, self.ay + 2, self.bx - 2, self.by - 2, {
