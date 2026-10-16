@@ -48,14 +48,14 @@ function Elements:update_proximities()
 				element:update_proximity()
 			end
 
-			if element.proximity_raw == 0 then
+			if element.proximity_raw <= 0 then
 				-- Mouse entered element area
-				if previous_proximity_raw ~= 0 then
+				if previous_proximity_raw > 0 then
 					mouse_enter_elements[#mouse_enter_elements + 1] = element
 				end
 			else
 				-- Mouse left element area
-				if previous_proximity_raw == 0 then
+				if previous_proximity_raw <= 0 then
 					mouse_leave_elements[#mouse_leave_elements + 1] = element
 				end
 			end
@@ -71,7 +71,7 @@ end
 ---@param ids string[] IDs of elements to peek.
 function Elements:toggle(ids)
 	local has_invisible = itable_find(ids, function(id)
-		return Elements[id] and Elements[id].enabled and Elements[id]:get_visibility() ~= 1
+		return Elements[id] and Elements[id].enabled and (Elements[id].min_visibility or 0) ~= 1
 	end)
 
 	self:set_min_visibility(has_invisible and 1 or 0, ids)
@@ -101,8 +101,13 @@ end
 -- Flash passed elements.
 ---@param ids string[] IDs of elements to peek.
 function Elements:flash(ids)
-	local elements = itable_filter(self._all, function(element) return itable_index_of(ids, element.id) ~= nil end)
+	local elements = itable_filter(self._all, function(element) return itable_has(ids, element.id) end)
 	for _, element in ipairs(elements) do element:flash() end
+
+	-- Special case for 'progress' since it's a state of timeline, not an element
+	if itable_has(ids, 'progress') and not itable_has(ids, 'timeline') then
+		Elements:maybe('timeline', 'flash_progress')
+	end
 end
 
 ---@param name string Event name.
@@ -117,7 +122,7 @@ function Elements:proximity_trigger(name, ...)
 	for i = #self._all, 1, -1 do
 		local element = self._all[i]
 		if element.enabled then
-			if element.proximity_raw == 0 then
+			if element.proximity_raw <= 0 then
 				if element:trigger(name, ...) == 'stop_propagation' then break end
 			end
 			if element:trigger('global_' .. name, ...) == 'stop_propagation' then break end

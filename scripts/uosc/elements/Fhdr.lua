@@ -5,6 +5,7 @@
 -- Controls.lua 中以 kind == 'fhdr' 挂载
 
 local Element = require('elements/Element')
+-- Elements/cursor/config/state 等为 uosc 注入的全局（Element.lua 同款用法）
 
 local COLOR_ON  = 'ffb13f' -- 橙(开启)
 local COLOR_OFF = '8a8a8a' -- 灰(关闭)
@@ -68,8 +69,8 @@ function FhdrSlider:init(id, props)
 	self.dragging = nil
 	self.margin = 14
 	self.enabled_flag = false    -- 由 FhdrButton 每帧驱动
-	self.render_order = 5000     -- 画在其他元素之上
 	Element.init(self, id, props)
+	self.render_order = 5000     -- 画在其他元素之上（须在 Element.init 后设置，5.13 里 init 会硬置为 1）
 	-- 外部改值（如脚本/未来其他UI）时同步显示
 	mp.observe_property('user-data/sdrboost/peak', 'native', function(_, v)
 		if v and not self.dragging then self.value = v; request_render() end
@@ -80,6 +81,8 @@ function FhdrSlider:place(ax, ay, bx, by)
 	self.ax, self.ay, self.bx, self.by = ax, ay, bx, by
 	self.height, self.width = by - ay, bx - ax
 	self.font_size = round(self.height * 0.42)
+	-- uosc 5.13: 坐标更新后必须刷新 proximity，滑块自身 hover 保活依赖此链路
+	Elements:update_proximities()
 end
 
 function FhdrSlider:set_value(v, osd_notify)

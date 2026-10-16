@@ -215,6 +215,7 @@ function Volume:destroy()
 end
 
 function Volume:get_visibility()
+	if not state.is_idle and not state.has_audio then return 0 end
 	return self.slider.pressed and 1 or Elements:maybe('timeline', 'get_is_hovered') and -1
 		or Element.get_visibility(self)
 end
@@ -241,6 +242,7 @@ end
 function Volume:on_display() self:update_dimensions() end
 function Volume:on_prop_border() self:update_dimensions() end
 function Volume:on_prop_title_bar() self:update_dimensions() end
+function Volume:on_prop_volume_max() self:update_dimensions() end
 function Volume:on_controls_reflow() self:update_dimensions() end
 function Volume:on_options() self:update_dimensions() end
 
@@ -249,7 +251,7 @@ function Volume:render()
 	if visibility <= 0 then return end
 
 	-- Reset volume on secondary click
-	cursor:zone('secondary_down', self, function()
+	cursor:zone('secondary_click', self, function()
 		mp.set_property_native('mute', false)
 		mp.set_property_native('volume', 100)
 	end)
@@ -264,16 +266,12 @@ function Volume:render()
 	local icon_name, horizontal_shift = 'volume_up', 0
 	if state.mute then
 		icon_name = 'volume_off'
-	elseif state.volume < 50 then
+	elseif state.volume <= 0 then
 		icon_name, horizontal_shift = 'volume_mute', height_half * 0.25
-	elseif state.volume < 80 then
+	elseif state.volume <= 60 then
 		icon_name, horizontal_shift = 'volume_down', height_half * 0.125
-	elseif state.volume > 100 and state.volume <= 125 then
-		icon_name, horizontal_shift = 'noise_aware', 0
-	elseif state.volume > 125 then
-		icon_name, horizontal_shift = 'noise_control_off', 0
 	end
-	local underlay_opacity = {main = visibility * 0.2, border = visibility * 0.5}
+	local underlay_opacity = {main = visibility * 0.3, border = visibility}
 	ass:icon(mute_rect.ax + width_half, mute_rect.ay + height_half, icon_size, 'volume_up',
 		{border = options.text_border * state.scale, opacity = underlay_opacity, align = 5}
 	)
