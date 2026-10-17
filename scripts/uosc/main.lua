@@ -2,6 +2,17 @@
 local uosc_version = '5.13.0'
 
 mp.commandv('script-message', 'uosc-version', uosc_version)
+-- 维护通道: script-message-to uosc dump-state → 打印内部缩放/尺寸状态到日志
+mp.register_script_message('dump-state', function()
+	local osd_w, osd_h = mp.get_osd_size()
+	msg.info(string.format(
+		'UOSC_STATE scale=%.3f radius=%s hidpi=%s fullormaxed=%s osd=%sx%s logic=%sx%s window_factor=%.3f',
+		state.scale, tostring(state.radius), tostring(state.hidpi_scale),
+		tostring(state.fullormaxed), tostring(osd_w), tostring(osd_h),
+		tostring(round(osd_w / (state.hidpi_scale or 1))), tostring(round(osd_h / (state.hidpi_scale or 1))),
+		math.max(1, (osd_h or 0) / ((state.hidpi_scale or 1) * 975))
+	))
+end)
 
 mp.set_property('osc', 'no')
 
@@ -451,7 +462,13 @@ end
 --[[ STATE UPDATERS ]]
 
 function update_display_dimensions()
-	state.scale = (state.hidpi_scale or 1) * (state.fullormaxed and options.scale_fullscreen or options.scale)
+	-- 2026-10-17 patch: 窗口相对UI缩放（海涛需求：UI按窗口大小百分比缩放，但不小于基准大小）
+	-- 基准 975 逻辑高（常用窗口高度）：窗口更高时 UI 按比例放大，更矮时保持基准不缩
+	local osd_w, osd_h = mp.get_osd_size()
+	local logic_h = (osd_h or 0) / (state.hidpi_scale or 1)
+	local window_factor = math.max(1, logic_h / 975)
+	state.scale = (state.hidpi_scale or 1) * window_factor
+		* (state.fullormaxed and options.scale_fullscreen or options.scale)
 	state.radius = round(options.border_radius * state.scale)
 	local real_width, real_height = mp.get_osd_size()
 	if real_width <= 0 then return end
