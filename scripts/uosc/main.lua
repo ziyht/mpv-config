@@ -14,7 +14,7 @@ mp.register_script_message('dump-state', function()
 		state.scale, tostring(state.radius), tostring(state.hidpi_scale),
 		tostring(state.fullormaxed), tostring(osd_w), tostring(osd_h),
 		tostring(round(osd_w / (state.hidpi_scale or 1))), tostring(round(osd_h / (state.hidpi_scale or 1))),
-		math.max(1, ((osd_h or 0) / 1950) ^ 2.98)
+		math.max(1, (osd_h or 0) / 1080)
 	))
 end)
 
@@ -466,13 +466,15 @@ end
 --[[ STATE UPDATERS ]]
 
 function update_display_dimensions()
-	-- 2026-10-17 patch: 窗口相对UI缩放（海涛需求：UI按窗口大小百分比缩放，但不小于基准大小）
-	-- 以【物理窗口高】为变量的幂曲线 factor = max(1, (物理高/1950)^2.98)：
-	--   · 物理高 1950（=975 逻辑常用窗）及以下：保持基准 1.0 不缩
-	--   · Studio Display 5K 全屏（物理高 2820）：3.0 倍——突破"与视频等比"（等比只有体感没变）
-	--   · 全程连续单调无阶梯。指数 2.98 = ln3/ln(2820/1950) 由"5K屏全屏3倍"锚点反解。
+	-- 2026-10-17 patch: 窗口相对UI缩放 v5（海涛规格：以测试视频1080p为UI最小基准，窗口放大等比放大，4K=2倍，5K≈2.5倍）
+	-- factor = max(1, osd物理高/1080)，纯线性等比
+	--   · osd 高 1080（1080p 视频默认窗）= UI 基准 1.0，更小的窗口保持 1.0 不缩（"不小于当前"约束）
+	--   · 窗口放大：严格线性等比——窗口拉大 1.5 倍 UI 就大 1.5 倍
+	--   · 4K 屏全屏 osd=2160 → 精确 2.0；5K 屏全屏 osd=2820 → 2.61（≥2.5 规格，略超）
+	--   · 注：4K(2.0)与5K(2.5)双标称锚点在单幂函数下不可同时精确（p=1 vs 0.954），
+	--     取"等比例"原则（海涛原话）用线性；5K 实际 2.61 在放大侧超出规格
 	local osd_w, osd_h = mp.get_osd_size()
-	local window_factor = math.max(1, ((osd_h or 0) / 1950) ^ 2.98)
+	local window_factor = math.max(1, (osd_h or 0) / 1080)
 	state.scale = (state.hidpi_scale or 1) * window_factor
 		* (state.fullormaxed and options.scale_fullscreen or options.scale)
 	state.radius = round(options.border_radius * state.scale)
