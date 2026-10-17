@@ -1059,6 +1059,14 @@ function render()
 	osd.res_y = display.height
 	osd.data = ass.text
 	osd.z = 2000
+	-- 维护通道: dump-ui 时把下一次渲染的ass存盘(限流3秒)
+	if state._ui_dump_request and mp.get_time() - (state._ui_dump_t or 0) > 3 then
+		state._ui_dump_t = mp.get_time()
+		local req = state._ui_dump_request
+		state._ui_dump_request = nil
+		local f = io.open(req, 'w')
+		if f then f:write(ass.text) f:close() end
+	end
 	osd:update()
 
 	update_margins()

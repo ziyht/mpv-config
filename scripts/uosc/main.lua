@@ -3,6 +3,10 @@ local uosc_version = '5.13.0'
 
 mp.commandv('script-message', 'uosc-version', uosc_version)
 -- 维护通道: script-message-to uosc dump-state → 打印内部缩放/尺寸状态到日志
+mp.register_script_message('dump-ui', function(path)
+	state._ui_dump_request = path and path ~= '' and path or '/tmp/uosc_ui_ass.txt'
+	request_render()
+end)
 mp.register_script_message('dump-state', function()
 	local osd_w, osd_h = mp.get_osd_size()
 	msg.info(string.format(
@@ -10,7 +14,7 @@ mp.register_script_message('dump-state', function()
 		state.scale, tostring(state.radius), tostring(state.hidpi_scale),
 		tostring(state.fullormaxed), tostring(osd_w), tostring(osd_h),
 		tostring(round(osd_w / (state.hidpi_scale or 1))), tostring(round(osd_h / (state.hidpi_scale or 1))),
-		math.max(1, ((osd_h or 0) / 1950) ^ 1.878)
+		math.max(1, ((osd_h or 0) / 1950) ^ 2.98)
 	))
 end)
 
@@ -463,12 +467,12 @@ end
 
 function update_display_dimensions()
 	-- 2026-10-17 patch: 窗口相对UI缩放（海涛需求：UI按窗口大小百分比缩放，但不小于基准大小）
-	-- 以【物理窗口高】为变量的幂曲线 factor = max(1, (物理高/1950)^1.878)：
+	-- 以【物理窗口高】为变量的幂曲线 factor = max(1, (物理高/1950)^2.98)：
 	--   · 物理高 1950（=975 逻辑常用窗）及以下：保持基准 1.0 不缩
-	--   · Studio Display 5K 全屏（物理高 2820，4K 以上量级）：_精确 2.0 翻倍_
-	--   · 全程连续单调无阶梯。指数 1.878 = ln2/ln(2820/1950) 由"5K屏全屏翻倍"锚点反解。
+	--   · Studio Display 5K 全屏（物理高 2820）：3.0 倍——突破"与视频等比"（等比只有体感没变）
+	--   · 全程连续单调无阶梯。指数 2.98 = ln3/ln(2820/1950) 由"5K屏全屏3倍"锚点反解。
 	local osd_w, osd_h = mp.get_osd_size()
-	local window_factor = math.max(1, ((osd_h or 0) / 1950) ^ 1.878)
+	local window_factor = math.max(1, ((osd_h or 0) / 1950) ^ 2.98)
 	state.scale = (state.hidpi_scale or 1) * window_factor
 		* (state.fullormaxed and options.scale_fullscreen or options.scale)
 	state.radius = round(options.border_radius * state.scale)
