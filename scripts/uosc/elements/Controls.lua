@@ -202,19 +202,24 @@ function Controls:init_options()
 				msg.error('there can only be 1 speed slider')
 			end
 		elseif kind == 'fhdr' then
-			-- 2026-10-16 patch: FHDR 文字按钮 + 悬停滑块（SDR 亮度增强控制）
-			-- 2026-10-17 re-ported onto uosc 5.13.0
+			-- FHDR 开关按钮（SDR 亮度增强）：字母变色显示状态；峰值调节见相邻的 fhdr-speed 滑块
+			-- 2026-10-16 初版，2026-10-17 滑块改为 Speed 样式独立控件（元素 FhdrSpeed）
 			local Fhdr = require('elements/Fhdr')
-			if not self.fhdr_slider then
-				self.fhdr_slider = Fhdr.Slider:new('fhdr_slider', {})
-			end
 			local element = Fhdr.Button:new('control_fhdr_' .. i, {
 				render_order = self.render_order,
 				anchor_id = 'controls',
-				slider = self.fhdr_slider,
 				on_click = function() mp.command('script-message sdrboost-toggle') end,
 			})
 			table_assign(control, {element = element, sizing = 'static', scale = 1, ratio = 2.2})
+		elseif kind == 'fhdr-speed' then
+			-- FHDR 峰值滑块（Speed 同款样式），100-2000nit，写 user-data/sdrboost/peak
+			if not Elements.fhdr_speed then
+				local FhdrSpeed = require('elements/FhdrSpeed')
+				local element = FhdrSpeed:new({anchor_id = 'controls', render_order = self.render_order})
+				table_assign(control, {element = element, sizing = 'dynamic', scale = 1.3, ratio = 3.5, ratio_min = 2})
+			else
+				msg.error('there can only be 1 fhdr-speed slider')
+			end
 		else
 			msg.error('unknown element kind "' .. kind .. '"')
 			break

@@ -14,6 +14,36 @@ local opts = require 'mp.options'
 opts.read_options(settings, 'sdrboost')
 settings.peak = math.max(100, math.min(2000, tonumber(settings.peak) or 1600))
 
+-- FHDR 开启时应用的完整参数链
+-- 2026-10-17 补全：之前只设 target-* 三项，saturation/gamut 等五参数缺失，
+-- 因 [HDR-PQ] 的 profile-cond 看的是【源 gamma】，SDR 源被 FHDR 拉亮时仍为 bt.1886 永不命中——
+-- 造成"开启 FHDR 后色彩不如之前饱和"（10-16 五参数移入 profile 前的旧观感是全局生效的）
+-- 2026-10-17 v2 修正：hdr-reference-white、tone-mapping 两项不可照搬 [HDR-PQ] profile：
+--   · hdr-reference-white=SDR参考白在HDR输出的nit值（默认203），inverse场景白位压到35nit全画面变暗
+--   · tone-mapping=st2094-10 是 HDR10+ 动态元数据曲线，SDR 源无元数据时在 inverse 管线里成末端压缩，
+--     像素矩阵实测压暗 -17%；去掉走 auto 则提亮生效
+--   单变量矩阵验证：saturation/gamut-clip/contrast-recovery/target-prim 亮度零影响，保留
+local APPLY = {
+	{'inverse-tone-mapping', 'yes'},
+	{'target-trc',           'pq'},
+	{'target-peak',          nil},  -- 动态: settings.peak
+	{'target-prim',          'bt.2020'},
+	{'saturation',           '8'},
+	{'gamut-mapping-mode',   'clip'},
+	{'hdr-contrast-recovery', '0.3'},
+}
+local REVERT = {
+	{'inverse-tone-mapping', 'no'},
+	{'target-trc',           'auto'},
+	{'target-peak',          'auto'},
+	{'target-prim',          'auto'},
+	{'tone-mapping',         'auto'},
+	{'hdr-reference-white',  'auto'},
+	{'saturation',           '0'},
+	{'gamut-mapping-mode',   'auto'},
+	{'hdr-contrast-recovery', '0'},
+}
+
 local boosting = false          -- 当前是否实际占用着 target-* 属性
 local last_message = nil        -- 防止 OSD 抖动的简单去重
 
@@ -43,6 +73,18 @@ local function sync_user_data()
     mp.set_property_native('user-data/sdrboost/peak', settings.peak)
 end
 
+local function apply()
+    for _, kv in ipairs(APPLY) do
+        mp.set_property(kv[1], kv[2] or tostring(settings.peak))
+    end
+end
+
+local function revert()
+    for _, kv in ipairs(REVERT) do
+        mp.set_property(kv[1], kv[2])
+    end
+end
+
 local function refresh()
     local g = mp.get_property('video-params/gamma')
 
@@ -50,25 +92,20 @@ local function refresh()
         -- SDR 源
         if settings.enabled then
             if not boosting or mp.get_property('target-peak') ~= tostring(settings.peak) then
-                mp.set_property('inverse-tone-mapping', 'yes')
-                mp.set_property('target-trc', 'pq')
-                mp.set_property('target-peak', tostring(settings.peak))
+                apply()
             end
             boosting = true
         elseif boosting then
-            mp.set_property('inverse-tone-mapping', 'no')
-            mp.set_property('target-trc', 'auto')
-            mp.set_property('target-peak', 'auto')
+            revert()
             boosting = false
         end
     else
         -- 无视频或 HDR 源：HDR 时把 target-* 让给 [HDR-PQ] profile，不撤销不留痕
+        -- 让位时若 profile 接管（同样参数值），无需 revert；若视频卸载（无视频），还原参数
         if boosting and g and g ~= '' and gamma_is_hdr(g) then
-            boosting = false   -- 交权，不 revert（profile 已接管）
+            boosting = false   -- 交权，不 revert（profile 已接管相同参数值）
         elseif boosting and (not g or g == '') then
-            mp.set_property('inverse-tone-mapping', 'no')
-            mp.set_property('target-trc', 'auto')
-            mp.set_property('target-peak', 'auto')
+            revert()
             boosting = false
         end
         -- 关闭状态或 HDR 时如 user 数据未同步则同步
