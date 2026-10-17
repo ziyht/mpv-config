@@ -10,7 +10,7 @@ mp.register_script_message('dump-state', function()
 		state.scale, tostring(state.radius), tostring(state.hidpi_scale),
 		tostring(state.fullormaxed), tostring(osd_w), tostring(osd_h),
 		tostring(round(osd_w / (state.hidpi_scale or 1))), tostring(round(osd_h / (state.hidpi_scale or 1))),
-		math.max(1, (osd_h or 0) / ((state.hidpi_scale or 1) * 975))
+		math.max(1, ((osd_h or 0) / 1950) ^ 1.878)
 	))
 end)
 
@@ -463,10 +463,12 @@ end
 
 function update_display_dimensions()
 	-- 2026-10-17 patch: 窗口相对UI缩放（海涛需求：UI按窗口大小百分比缩放，但不小于基准大小）
-	-- 基准 975 逻辑高（常用窗口高度）：窗口更高时 UI 按比例放大，更矮时保持基准不缩
+	-- 以【物理窗口高】为变量的幂曲线 factor = max(1, (物理高/1950)^1.878)：
+	--   · 物理高 1950（=975 逻辑常用窗）及以下：保持基准 1.0 不缩
+	--   · Studio Display 5K 全屏（物理高 2820，4K 以上量级）：_精确 2.0 翻倍_
+	--   · 全程连续单调无阶梯。指数 1.878 = ln2/ln(2820/1950) 由"5K屏全屏翻倍"锚点反解。
 	local osd_w, osd_h = mp.get_osd_size()
-	local logic_h = (osd_h or 0) / (state.hidpi_scale or 1)
-	local window_factor = math.max(1, logic_h / 975)
+	local window_factor = math.max(1, ((osd_h or 0) / 1950) ^ 1.878)
 	state.scale = (state.hidpi_scale or 1) * window_factor
 		* (state.fullormaxed and options.scale_fullscreen or options.scale)
 	state.radius = round(options.border_radius * state.scale)
