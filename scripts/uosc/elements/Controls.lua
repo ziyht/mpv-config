@@ -210,7 +210,7 @@ function Controls:init_options()
 				anchor_id = 'controls',
 				on_click = function() mp.command('script-message sdrboost-toggle') end,
 			})
-			table_assign(control, {element = element, sizing = 'static', scale = 1, ratio = 2.2})
+			table_assign(control, {element = element, sizing = 'static', scale = 1, ratio = 2.6})
 		elseif kind == 'fhdr-speed' then
 			-- FHDR 峰值滑块（Speed 同款样式），100-2000nit，写 user-data/sdrboost/peak
 			if not Elements.fhdr_speed then
@@ -219,6 +219,19 @@ function Controls:init_options()
 				table_assign(control, {element = element, sizing = 'dynamic', scale = 1.3, ratio = 3.5, ratio_min = 2})
 			else
 				msg.error('there can only be 1 fhdr-speed slider')
+			end
+		elseif kind == 'fhdr-scheme' then
+			-- FHDR 方案选择按钮: 点击循环 冲/贴/通/分 (sdrboost-scheme), OSD 报方案
+			local Fhdr = require('elements/Fhdr')
+			if not Elements.fhdr_scheme then
+				local element = Fhdr.SchemeButton:new('control_fhdr_scheme_' .. i, {
+					render_order = self.render_order,
+					anchor_id = 'controls',
+					on_click = function() mp.command('script-message sdrboost-scheme cycle') end,
+				})
+				table_assign(control, {element = element, sizing = 'static', scale = 1, ratio = 1.6})
+			else
+				msg.error('there can only be 1 fhdr-scheme button')
 			end
 		else
 			msg.error('unknown element kind "' .. kind .. '"')

@@ -65,10 +65,18 @@ function FhdrButton:new(id, props) return Class.new(self, id, props) --[[@as Fhd
 
 function FhdrButton:init(id, props)
 	local on_click = props.on_click
-	self._click = function() mp.add_timeout(0.01, on_click) end
+	self._last_click_t = 0
+	self._click = function()
+		-- 2026-10-17: 0.4s 防抖——历史上 cursor 派发疑似重复触发(0.3-0.5s节奏)造成toggle奇偶乱序
+		local now = mp.get_time()
+		if now - self._last_click_t < 0.4 then return end
+		self._last_click_t = now
+		mp.add_timeout(0.01, on_click)
+	end
 	Element.init(self, id, props)
-	-- 状态变化时驱动重绘（开关 + 片源 SDR/HDR 切换都要刷新外观）
+	-- 状态变化时驱动重绘（开关 + 方案 + 片源 SDR/HDR 切换都要刷新外观）
 	mp.observe_property('user-data/sdrboost/enabled', 'bool', function() request_render() end)
+	mp.observe_property('user-data/sdrboost/scheme', 'native', function() request_render() end)
 	mp.observe_property('video-params/gamma', 'string', function(_, g)
 		request_render()
 		-- HDR 态启动彩虹流动定时器（20fps 重绘），离开 HDR 停（不空烧 CPU）
@@ -83,7 +91,8 @@ function FhdrButton:init(id, props)
 end
 
 function FhdrButton:on_coordinates()
-	self.font_size = round((self.by - self.ay) * 0.48)
+	self.font_size = round((self.by - self.ay) * 0.42)
+	self.width = self.bx - self.ax  -- 'FHDR|冲' 布局用
 end
 
 function FhdrButton:render()
@@ -91,12 +100,31 @@ function FhdrButton:render()
 	if visibility <= 0 then return end
 
 	local is_enabled = mp.get_property_bool('user-data/sdrboost/enabled')
+	-- 2026-10-17: label 由 scheme 数字在本地映射(中文经 user-data 会被 mpv0.41 弄脏带引号)
+	local SCHEME_LABELS = {[1] = '冲', [2] = '贴', [3] = '通'}
+	local scheme_label = SCHEME_LABELS[tonumber(mp.get_property('user-data/sdrboost/scheme')) or 1] or '冲'
 	local is_hover = self.proximity_raw == 0
 	-- HDR 源检测：按钮变彩色 'HDR' + 发光，忽略 sdrboost 开关（升压对 HDR 无意义）
 	local src_gamma = mp.get_property('video-params/gamma')
 	local is_hdr_src = src_gamma == 'pq' or src_gamma == 'arib-std-b67'
 
-	cursor:zone('primary_down', self, function() self._click() end)
+	-- 2026-10-17: 左键=四态推进 关→冲→贴→通→关 (海涛定);菜单条目无注释纯名字
+	cursor:zone('primary_down', self, function()
+		local now = mp.get_time()
+		if now - self._last_click_t < 0.4 then return end
+		self._last_click_t = now
+		mp.command('script-message sdrboost-advance')
+	end)
+	cursor:zone('secondary_click', self, function()
+		open_command_menu({
+			type = 'fhdr-scheme-menu', title = 'FHDR 方案',
+			items = {
+				{title = '冲 · 立体冲击', value = 'script-message sdrboost-scheme 1', active = scheme_label == '冲'},
+				{title = '贴 · 原生贴合', value = 'script-message sdrboost-scheme 2', active = scheme_label == '贴'},
+				{title = '通 · 直通对齐', value = 'script-message sdrboost-scheme 3', active = scheme_label == '通'},
+			},
+		})
+	end)
 
 	local ass = assdraw.ass_new()
 
@@ -109,7 +137,6 @@ function FhdrButton:render()
 		})
 	end
 
-	-- 字母（HDR源='HDR'彩虹波浪发光；SDR源='FHDR' 开=橙 关=灰）
 	local x, y = round(self.ax + (self.bx - self.ax) / 2), round(self.ay + (self.by - self.ay) / 2)
 	if is_hdr_src then
 		if config.opacity.controls > 0 or is_hover then
@@ -118,39 +145,94 @@ function FhdrButton:render()
 				border = 1.5, border_color = COLOR_HDR,
 			})
 		end
-		-- 彩虹波浪：邻近色小相位差渐变（不割裂）+ 亮度脉冲波错峰传播（单独变但联动）
+		-- 彩虹波浪（HDR 源指示，与开关无关）
 		local t = mp.get_time()
 		local letters = {'H', 'D', 'R'}
 		local spacing = self.font_size * 0.64
-		local x0 = x - spacing  -- 三字母居中: x - sp, x, x + sp
+		local x0 = x - spacing
 		for i, letter in ipairs(letters) do
-			-- 色相：整体缓慢旋转，字母间小偏移(0.11≈40°)形成渐进波浪带
 			local hue = (t * 0.10 - (i - 1) * 0.11) % 1
-			-- 亮度：sin 波沿字母序错峰传播（0.7Hz，相位步进 ~60°）
 			local wave = 0.5 + 0.5 * math.sin(t * math.pi * 2 * 0.7 - (i - 1) * 1.05)
-			local intensity = 0.35 + 0.65 * wave  -- ∈ [0.35, 1]
+			local intensity = 0.35 + 0.65 * wave
 			glow_txt(ass, x0 + (i - 1) * spacing, y, self.font_size, letter, hue_to_rgb(hue), intensity)
 		end
 	elseif is_enabled then
-		-- 橙色描边框包住按钮，开启态醒目
+		-- 开启: 'FHDR冲' 直接连排(无任何分隔符号)
 		ass:rect(self.ax + 2, self.ay + 2, self.bx - 2, self.by - 2, {
 			color = '000000', radius = state.radius,
 			opacity = 0,
 			border = 1.5, border_color = COLOR_ON,
 		})
-		glow_txt(ass, x, y, self.font_size, 'FHDR', COLOR_ON)
+		glow_txt(ass, x, y, self.font_size, 'FHDR' .. scheme_label, COLOR_ON)
 	else
-		ass:txt(x, y, 5, 'FHDR', {
-			size = self.font_size,
-			color = COLOR_OFF,
-			opacity = visibility * 0.8,
-			bold = true,
-			border = 1,
-			border_color = '000000',
+		-- 关闭: 灰 'FHDR冲'
+		ass:txt(x, y, 5, 'FHDR' .. scheme_label, {
+			size = self.font_size, color = COLOR_OFF,
+			opacity = visibility * 0.8, bold = true,
+			border = 1, border_color = '000000',
 		})
 	end
 
 	return ass
 end
 
-return {Button = FhdrButton}
+-- ==================== 方案按钮 ====================
+
+local SchemeButton = class(Element)
+
+function SchemeButton:new(id, props) return Class.new(self, id, props) --[[@as SchemeButton]] end
+
+function SchemeButton:init(id, props)
+	local on_click = props.on_click
+	self._last_click_t = 0
+	self._click = function()
+		-- 2026-10-17: 仅防抖。 曾试加 proximity gate 防"启动跳档",实测会拦截正常点击(反例海涛验收),已撤。
+		local now = mp.get_time()
+		if now - self._last_click_t < 0.4 then return end
+		self._last_click_t = now
+		mp.add_timeout(0.01, on_click)
+	end
+	Element.init(self, id, props)
+	mp.observe_property('user-data/sdrboost/scheme', 'native', function() request_render() end)
+	mp.observe_property('user-data/sdrboost/enabled', 'bool', function() request_render() end)
+end
+
+function SchemeButton:on_coordinates()
+	self.font_size = round((self.by - self.ay) * 0.58)
+end
+
+function SchemeButton:render()
+	local visibility = self:get_visibility()
+	if visibility <= 0 then return end
+
+	local SCHEME_LABELS = {[1] = '冲', [2] = '贴', [3] = '通'}
+	local label = SCHEME_LABELS[tonumber(mp.get_property('user-data/sdrboost/scheme')) or 1] or '冲'
+	local fhdr_on = mp.get_property_bool('user-data/sdrboost/enabled')
+	local is_hover = self.proximity_raw == 0
+
+	cursor:zone('primary_down', self, function() self._click() end)
+
+	local ass = assdraw.ass_new()
+
+	if is_hover or config.opacity.controls > 0 then
+		ass:rect(self.ax, self.ay, self.bx, self.by, {
+			color = is_hover and 'ffffff' or '000000',
+			radius = state.radius,
+			opacity = visibility * (is_hover and 0.15 or config.opacity.controls),
+		})
+	end
+
+	local x, y = round(self.ax + (self.bx - self.ax) / 2), round(self.ay + (self.by - self.ay) / 2)
+	ass:txt(x, y, 5, '方' .. label, {
+		size = self.font_size,
+		color = fhdr_on and 'ffffff' or COLOR_OFF,
+		opacity = visibility * (fhdr_on and 1 or 0.7),
+		bold = true,
+		border = 1,
+		border_color = '000000',
+	})
+
+	return ass
+end
+
+return {Button = FhdrButton, SchemeButton = SchemeButton}
